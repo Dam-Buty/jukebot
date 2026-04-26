@@ -1,0 +1,16 @@
+services:
+  jukebot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: jukebot
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      # state.json (queue + horloge virtuelle) persiste entre restarts.
+      - ./data:/app/data
+    # Pas de ports exposés : le bot est purement sortant (gateway WebSocket
+    # vers Discord). Pas de healthcheck HTTP non plus.
+    stop_grace_period: 10s
+    init: true

@@ -370,6 +370,45 @@ channel playlist :
 
 ---
 
+## D15 — Docker comme runtime canonique
+
+**Décision.** Le bot tourne dans une image Docker auto-suffisante (Node 20 +
+ffmpeg + yt-dlp + Python3). L'hôte n'a besoin que de Docker et Docker
+Compose — plus aucune dépendance bare-metal côté machine d'exécution.
+`docker compose up -d` est le geste de démarrage canonique. Tourner sans
+Docker (`npm install` + `node`) reste possible pour le dev local, documenté
+en deuxième position dans le `README`.
+
+**Raison.**
+- yt-dlp casse régulièrement quand YouTube change ses formats : un rebuild
+  d'image = un yt-dlp frais, sans avoir à pip install à la main sur l'hôte.
+- ffmpeg n'a pas la même version partout (Ubuntu LTS, Mac brew, Arch),
+  l'image fige une version reproductible.
+- Reproductibilité "ça marche chez moi" → vraie immutabilité.
+
+**Conséquences.**
+- Build **multi-stage** : `node:20-bookworm-slim` pour les deux stages.
+  Debian (pas Alpine) parce que `@discordjs/opus` + libsodium sont moins
+  galère avec glibc qu'avec musl + node-gyp.
+- yt-dlp installé via le **zipapp officiel** depuis GitHub releases
+  (architecture-agnostique, requiert juste `python3` runtime). Le fait que
+  ce soit un zipapp Python plutôt qu'un binaire PyInstaller permet à
+  l'image de tourner sur x86_64 et arm64 (utile si tu déploies sur RPi /
+  Mac M-series).
+- Image runtime tourne sous user non-root `jukebot`.
+- `data/` monté en **volume bind** (`./data:/app/data`) → `state.json`
+  persiste entre restarts du conteneur, comme prévu en D4.
+- `.env` chargé via `env_file:` dans `docker-compose.yml`. Le `--env-file`
+  Node natif n'est plus utile dans ce mode.
+- Pas de port exposé : le bot est purement outbound (WebSocket Discord
+  Gateway).
+- `prerequisites.ts` (Phase 2 du PLAN) reste pertinent à l'intérieur du
+  conteneur comme belt-and-suspenders, même si l'image *devrait* toujours
+  les avoir — un check qui prend 50ms vaut mieux qu'un crash bizarre au
+  premier track.
+
+---
+
 ## Décisions ouvertes (à trancher)
 
 *(toutes les décisions structurantes du MVP sont prises — il ne reste que

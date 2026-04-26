@@ -51,11 +51,12 @@ pour les décisions de design qui sous-tendent ce plan.
 L'ordre est conçu pour que chaque phase soit testable de bout en bout
 indépendamment (au moins manuellement) avant de passer à la suivante.
 
-### Phase 0 — Scaffolding TypeScript
+### Phase 0 — Scaffolding TypeScript + Docker
 
-**But** : projet TS qui compile et qui se lance, rien d'autre.
+**But** : projet TS qui compile et qui se lance dans un conteneur Docker,
+rien d'autre.
 
-**Tâches** :
+**Tâches TypeScript** :
 - `package.json` (`"type": "module"`, scripts `dev`, `build`, `start`).
 - `tsconfig.json` strict, target `ES2022`, module `NodeNext`,
   `moduleResolution: NodeNext`, `outDir: dist`.
@@ -69,9 +70,20 @@ indépendamment (au moins manuellement) avant de passer à la suivante.
 - Scripts npm :
   - `dev` → `tsx watch src/main.ts`
   - `build` → `tsc`
-  - `start` → `node --env-file=.env dist/main.js`
+  - `start` → `node dist/main.js` *(Docker fournit déjà l'env via
+    `env_file:` dans compose ; le `--env-file=.env` natif Node n'est utile
+    qu'en local sans Docker)*
 
-**Sortie attendue** : `npm run dev` log "hello" et termine proprement.
+**Tâches Docker** *(déjà scaffoldées en amont — `Dockerfile`,
+`docker-compose.yml`, `.dockerignore` existent déjà ; reste à valider)* :
+- Vérifier que `docker compose build` passe une fois `package.json` et
+  `src/main.ts` en place.
+- Vérifier que `docker compose up` log "hello" puis exit clean.
+- Vérifier que `data/state.json` (créé manuellement avec `{}`) est bien
+  persistant via le volume bind.
+
+**Sortie attendue** : `npm run dev` log "hello" en local **et** `docker
+compose up --build` log "hello" dans un conteneur.
 
 ---
 
@@ -406,11 +418,14 @@ jukebot/
 ├── package.json
 ├── tsconfig.json
 ├── .env.example
+├── Dockerfile               # multi-stage build
+├── docker-compose.yml
+├── .dockerignore
 ├── README.md
 ├── SETUP.md
 ├── CLAUDE.md
 ├── PLAN.md
-├── data/                    # gitignored, runtime
+├── data/                    # gitignored, runtime, monté en volume
 │   └── state.json
 └── src/
     ├── main.ts              # bootstrap
@@ -440,12 +455,16 @@ jukebot/
         └── atomicWrite.ts   # write-temp-rename
 ```
 
-## Dépendances système à documenter
+## Dépendances système
 
-À ajouter dans `README.md` côté setup :
+**Mode Docker (canonique)** : seul `docker` + `docker compose` requis sur
+l'hôte. Tout le reste (Node, ffmpeg, yt-dlp, Python3) est dans l'image —
+voir D15 dans `CLAUDE.md`.
+
+**Mode local (dev seulement)** :
 - `node` ≥ 20
 - `ffmpeg` (n'importe quelle version récente)
-- `yt-dlp` (toujours récent — `pip install -U yt-dlp` ou via `pipx`)
+- `yt-dlp` (à jour — `pip install -U yt-dlp` ou via `pipx`)
 
 ## Tests
 

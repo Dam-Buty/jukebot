@@ -1,0 +1,39 @@
+.git
+.gitignore
+.github
+
+# Local dev artefacts
+node_modules
+dist
+*.tsbuildinfo
+
+# Runtime data — must NOT ship in image (volume monté à l'exécution)
+data
+*.sqlite
+*.sqlite-journal
+queue.json
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Editor / OS
+.vscode
+.idea
+.DS_Store
+*.swp
+
+# Logs
+*.log
+
+# Docs (pas nécessaires dans l'image)
+README.md
+SETUP.md
+CLAUDE.md
+PLAN.md
+
+# Le Dockerfile lui-même n'a pas besoin d'être copié dans l'image
+Dockerfile
+docker-compose.yml
+.dockerignore
