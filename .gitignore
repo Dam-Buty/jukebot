@@ -1,0 +1,32 @@
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Build output
+dist/
+build/
+*.tsbuildinfo
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+*.swp
+
+# Runtime data
+*.log
+data/
+queue.json
+*.sqlite
+*.sqlite-journal
+
+# yt-dlp cache
+.cache/
