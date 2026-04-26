@@ -79,12 +79,18 @@ export const installVoicePresence = (channel: VoiceChannel): void => {
     const count = countHumans(live);
     if (count === lastHumanCount) return;
 
-    if (lastHumanCount === 0 && count > 0) {
+    // Commit the new count BEFORE dispatching: onListenersArrived calls
+    // playCurrent() which queries hasListeners() back-channel via the
+    // probe. If we updated after, playCurrent would still see the old
+    // count (= 0) and silently defer, leaving the bot mute.
+    const prev = lastHumanCount;
+    lastHumanCount = count;
+
+    if (prev === 0 && count > 0) {
       void onListenersArrived(live);
-    } else if (count === 0 && lastHumanCount > 0) {
+    } else if (count === 0 && prev > 0) {
       onListenersLeft(live);
     }
-    lastHumanCount = count;
   });
 
   // Initial state: if someone is already in the room when we boot, kick
