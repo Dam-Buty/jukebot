@@ -73,16 +73,45 @@ export const scanChannel = async (
     // in parallel cuts a typical page from minutes to ~25s.
     const CONCURRENCY = 4;
     const pageTracks: Track[] = [];
+    let resolvedMessages = 0;
+    const totalMessages = sorted.length;
+    logger.info(
+      { page: pageNum, messages: totalMessages, concurrency: CONCURRENCY },
+      "page resolution starting",
+    );
+
     for (let i = 0; i < sorted.length; i += CONCURRENCY) {
       const slice = sorted.slice(i, i + CONCURRENCY);
       const settled = await Promise.allSettled(
-        slice.map((m) => extractTracksFromMessage(m)),
+        slice.map(async (m) => {
+          const found = await extractTracksFromMessage(m);
+          for (const t of found) {
+            logger.info(
+              {
+                title: `${t.uploader} — ${t.title}`,
+                durationSec: t.durationSec,
+                from: m.author.username,
+              },
+              "backfill: track resolved",
+            );
+          }
+          return found;
+        }),
       );
       for (const r of settled) {
         if (r.status === "fulfilled" && r.value.length > 0) {
           pageTracks.push(...r.value);
         }
       }
+      resolvedMessages += slice.length;
+      logger.info(
+        {
+          page: pageNum,
+          progress: `${resolvedMessages}/${totalMessages}`,
+          tracksOnPage: pageTracks.length,
+        },
+        "page progress",
+      );
     }
 
     if (sorted.length > 0) {
@@ -92,7 +121,7 @@ export const scanChannel = async (
     tracks.push(...pageTracks);
     logger.info(
       { page: pageNum, pageTracks: pageTracks.length, totalSoFar: tracks.length },
-      "backfill page resolved",
+      "page complete, streaming to queue",
     );
     // onPage receives the page's delta so callers can stream-append.
     if (onPage && pageTracks.length > 0) onPage(pageTracks);
