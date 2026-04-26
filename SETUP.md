@@ -39,11 +39,14 @@ Onglet **OAuth2 → URL Generator** :
 - **Bot Permissions** : coche au minimum
   - `View Channels`
   - `Send Messages`
-  - `Read Message History`
+  - `Read Message History` (obligatoire pour le backfill au boot et
+    `/reset-playlist`)
   - `Use Slash Commands`
+  - `Add Reactions` (le bot pose ✅/❌ sur les messages du channel
+    playlist pour signaler les liens ingérés / non résolus)
   - `Connect` (rejoindre un channel vocal)
   - `Speak` (parler dans un channel vocal)
-  - *(optionnel)* `Embed Links`, `Add Reactions`
+  - *(optionnel)* `Embed Links`
 
 Copie l'URL générée en bas de page → ouvre-la dans le navigateur → invite le
 bot sur ton serveur.
@@ -65,16 +68,26 @@ Pour pouvoir copier les IDs facilement :
 
 - *User Settings → Advanced → Developer Mode → ON*
 
-## 7. Récap des valeurs à me donner / mettre dans `.env`
+## 7. Récap des valeurs à mettre dans `.env`
 
-À la fin de cette procédure tu dois avoir en main :
+À la fin de cette procédure tu dois avoir en main les 5 valeurs requises
+(cf. `src/config.ts` pour la liste canonique) :
 
-| Variable               | Source                                            |
-| ---------------------- | ------------------------------------------------- |
-| `DISCORD_TOKEN`        | onglet Bot → Reset Token                          |
-| `DISCORD_CLIENT_ID`    | onglet General Information → Application ID      |
-| `DISCORD_GUILD_ID`     | clic droit sur ton serveur → Copy Server ID       |
-| `PLAYLIST_CHANNEL_ID`  | clic droit sur le channel texte "playlist"        |
-| `VOICE_CHANNEL_ID`     | clic droit sur le channel vocal "domicile" du bot |
+| Variable               | Source                                            | Requis |
+| ---------------------- | ------------------------------------------------- | ------ |
+| `DISCORD_TOKEN`        | onglet Bot → Reset Token                          | oui    |
+| `DISCORD_CLIENT_ID`    | onglet General Information → Application ID      | oui    |
+| `DISCORD_GUILD_ID`     | clic droit sur ton serveur → Copy Server ID       | oui    |
+| `PLAYLIST_CHANNEL_ID`  | clic droit sur le channel texte "playlist"        | oui    |
+| `VOICE_CHANNEL_ID`     | clic droit sur le channel vocal "domicile" du bot | oui    |
 
-Une fois ces 5 valeurs récupérées, on peut passer à l'implémentation.
+Et trois variables optionnelles avec des defaults raisonnables :
+
+| Variable                  | Default       | Description                                   |
+| ------------------------- | ------------- | --------------------------------------------- |
+| `IDLE_DISCONNECT_MINUTES` | `15`          | Temps sans humain dans le vocal avant que le bot quitte le channel (l'horloge continue ; il reconnecte au prochain arrivant). |
+| `LOG_LEVEL`               | `info`        | `trace` / `debug` / `info` / `warn` / `error` / `fatal`. |
+| `NODE_ENV`                | `development` | `production` désactive le pretty-print pino. Le `Dockerfile` le force à `production` automatiquement. |
+
+Une fois ces valeurs en place dans `.env`, retourne au `README.md` pour
+le démarrage (Docker ou local).

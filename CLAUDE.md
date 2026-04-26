@@ -14,6 +14,14 @@ Bot Discord qui :
 Utilisateur cible : un seul serveur Discord privé entre potes. Pas de
 multi-tenant, pas de scaling à prévoir.
 
+> **Statut implémentation.** D1 → D19 sont implémentées dans `src/`. Le
+> MVP a shippé. Voir `PLAN.md` pour le mapping décision → modules.
+> Décisions ajoutées en cours d'implémentation par rapport au plan
+> initial : D16 (track illisible = retrait définitif de la queue), D17
+> (veto par réaction ❌), D18 (`addedBy` + `addedAt` dérivé de
+> `message.createdAt`), D19 (cascade `player_client=android,web` côté
+> yt-dlp).
+
 ---
 
 ## D1 — Langage & runtime : TypeScript sur Node 20+
@@ -169,9 +177,8 @@ texte. La seule commande exposée est `/list` (cf. D11).
   timeline. Donc on dump `{ startedAt, queue }` dans `data/state.json` à
   chaque modif (ajout track, fin de track) — ce qui revient sur la D4 (la
   queue n'est plus *purement* éphémère).
-- Si un track échoue (vidéo retirée, age-gated, etc.) : on log, on saute, on
-  recale la timeline en considérant la durée annoncée comme "déjà écoulée"
-  pour ne pas faire dériver le clock.
+- Si un track échoue (vidéo retirée, age-gated, etc.) : voir D16 — on
+  retire le track de la queue plutôt que de le sauter à chaque tour.
 
 ---
 
@@ -245,9 +252,15 @@ nouveau lien est posté, on (re)démarre la timeline à `now`.
 `/list` répond avec un **code block ANSI Discord** (` ```ansi `) montrant :
 - En-tête ASCII / Unicode (titre + barre de séparation).
 - Track en cours, avec barre de progression Unicode (`▰▰▰▰▱▱▱▱`) et
-  timestamp `mm:ss / mm:ss`.
-- Les N suivants (par défaut 10) avec leur position dans la queue et durée.
-- Couleurs ANSI sobres : un accent sur le track courant, gris pour le reste.
+  timestamp `mm:ss / mm:ss`, plus une ligne "added by `<auteur>` ·
+  `<X ago>`" (cf. D18).
+- Les N suivants (par défaut 10) avec leur position dans la queue, durée,
+  et auteur tronqué.
+- Couleurs ANSI sobres : un accent sur le track courant, gris pour le
+  reste.
+- Implémenté dans `src/format/list.ts`, output borné à ~1900 chars
+  (down-sampling progressif de la liste up-next pour rester sous la
+  limite Discord 2000).
 
 Mock visuel cible :
 
@@ -362,11 +375,21 @@ channel playlist :
 - Le full scan d'un channel volumineux peut prendre du temps : on stream
   l'expansion (post une reaction sur le message du `/reset-playlist` style
   ⏳ → ✅, ou on edit la réponse différée Discord).
-- Pendant un `/reset-playlist`, la radio peut soit (a) continuer sur
-  l'ancienne queue jusqu'à ce que la nouvelle soit prête puis swap atomique,
-  soit (b) couper net et reprendre quand prêt. → choisir (a) pour ne pas
-  casser l'écoute en cours. **Ouvert : confirmer ce choix dans
-  l'implémentation.**
+- Pendant un `/reset-playlist`, on **coupe net** : `replaceAll(tracks)`
+  remplace la queue, puis `restartFromCurrent()` (cf.
+  `src/audio/playback.ts`) tue le ffmpeg en cours et redémarre sur le
+  nouveau track 0. C'est moins surprenant pour l'utilisateur que
+  d'attendre la fin du track en cours pour voir la nouvelle playlist
+  prendre effet. (Décision implémentation contre la proposition initiale
+  de swap atomique différé.)
+- Le scan `/reset-playlist` **n'utilise pas** le streaming par page de la
+  variante boot — il écrit l'intégralité du résultat en une fois via
+  `replaceAll`. Sur un gros channel ça peut prendre quelques secondes,
+  d'où le `interaction.deferReply()`.
+- Le scan boot, lui, **stream** chaque page dans la queue et persiste
+  `lastSeenMessageId` après chaque page, pour qu'un kill mid-scan
+  reprenne pile où il en était (cf. `src/main.ts` et le callback `onPage`
+  de `scanChannel`).
 
 ---
 
@@ -409,7 +432,142 @@ en deuxième position dans le `README`.
 
 ---
 
+## D16 — Track illisible : retrait de la queue, pas un skip
+
+**Décision.** Quand un track échoue (yt-dlp ne résout pas l'URL, ffmpeg
+plante mid-stream, vidéo retirée / age-gated / region-locked), on
+l'**enlève** complètement de la queue via `Store.removeTrackAt(index)`.
+Pas de tag `unavailable`, pas de retry au prochain tour.
+
+**Raison.**
+- D7 / D12 prédisaient un skip avec timeline qui avance "comme si" le
+  track avait joué. En pratique, sur une boucle infinie, ça veut dire
+  qu'on retombe sur le track cassé à chaque tour et qu'on perd 5 s à
+  retenter à chaque cycle.
+- Si le user veut le re-tenter, il peut juste re-poster le lien — le live
+  ingest le remettra dans la queue (ou bien `/reset-playlist` le
+  recapturera, à moins qu'un ❌ n'ait été ajouté entretemps, cf. D17).
+
+**Conséquences.**
+- `Store.removeTrackAt` (`src/playlist/store.ts`) gère trois cas selon
+  que le track retiré est avant, sur, ou après `currentIndex` ; quand
+  c'est le track courant, on ré-ancre `trackStartedAt = now` pour que le
+  nouveau track démarre à 0:00.
+- L'orchestrateur (`src/audio/playback.ts`) capture les deux modes
+  d'échec : (a) `playTrack` lève → on retire avant même que la lecture
+  démarre ; (b) le player émet `track-finished` avec une `Error` →
+  pareil.
+- Backoff de 750 ms entre échecs successifs pour éviter de pin le CPU
+  sur une queue 100 % cassée.
+
+---
+
+## D17 — Veto ❌ par réaction sur le message playlist
+
+**Décision.** Une réaction ❌ sur un message du channel playlist marque
+ce message comme **vetoé**. Tout pipeline de résolution (ingest live,
+backfill incrémental, full scan via `/reset-playlist`) **skip**
+silencieusement les messages vetoés via
+`hasNegativeReaction(message.reactions.cache.values())`.
+
+Le bot lui-même pose un ❌ quand toutes les URLs d'un message échouent à
+résoudre côté yt-dlp. Le user peut :
+- **laisser** le ❌ → le track ne reviendra plus jamais, même au prochain
+  reset ;
+- **retirer** le ❌ → au prochain `/reset-playlist`, le track sera
+  retenté.
+
+Et symétriquement, le user peut ajouter un ❌ à la main sur n'importe quel
+message pour vétoer définitivement un track qui passe trop, sans devoir
+supprimer le message Discord.
+
+**Raison.**
+- Effacer le message du channel marche aussi mais c'est destructif et
+  perd le contexte de qui a posté quoi quand.
+- Le ❌ est déjà l'emoji que le bot pose en cas d'échec — réutiliser le
+  même signal pour les deux sens est cohérent et évite d'inventer un
+  protocole de réactions parallèle.
+
+**Conséquences.**
+- Logique isolée dans `src/playlist/reactions.ts` (testée).
+- `extractTracksFromMessage` (dans `src/playlist/ingest.ts`) est le seul
+  point d'entrée d'ingestion : il check les réactions avant d'appeler
+  yt-dlp. Backfill et live ingest passent tous les deux par lui.
+- Les réactions ne sont pas toujours dans le cache au boot ;
+  `messages.fetch` côté backfill les ramène, mais des réactions ajoutées
+  pendant que le bot est down et avant que la page contenant le message
+  soit re-fetchée pourraient ne pas apparaître. En pratique
+  `/reset-playlist` règle le cas : il refait un scan complet.
+
+---
+
+## D18 — Métadonnées Track enrichies : `addedBy`, `addedAt = message createdAt`
+
+**Décision.** Chaque `Track` porte :
+- `addedBy: string` — display name (`globalName ?? username`) du humain
+  qui a posté le lien.
+- `addedAt: string` — ISO timestamp dérivé de `message.createdAt`, **pas**
+  du moment où le bot a scanné le message.
+- `addedByMessageId: string` — pour le veto ❌ (D17) et pour pouvoir
+  remonter au message d'origine.
+
+**Raison.**
+- Le `/list` affiche "added by chad · 2d ago" — l'utilisateur veut savoir
+  qui a posté quoi et quand.
+- Utiliser `message.createdAt` au lieu de `now` au moment du scan rend
+  `addedAt` **stable** entre un boot frais et un `/reset-playlist` :
+  rescanner le channel produit exactement les mêmes timestamps.
+- Cohérence de l'ordre : tracks ingérés en live et tracks récupérés au
+  backfill sont triés au même endroit dans `/list`.
+
+**Conséquences.**
+- `addedBy` est marqué optionnel sur le `Track` pour rester compatible
+  avec les `state.json` antérieurs à l'introduction du champ — on
+  retombe sur "?" dans le rendu `/list` plutôt que de planter au boot.
+- `relativeTime()` dans `src/format/list.ts` formate le delta : "just
+  now" → "Xm ago" → "Xh ago" → "yesterday" → "Xd ago" → "Xmo ago" →
+  "Xy ago".
+
+---
+
+## D19 — yt-dlp : cascade `player_client=android,web` + `bestaudio*/best`
+
+**Décision.** Tous les appels yt-dlp (metadata `--dump-json` comme URL
+résolution `-g`) passent les arguments :
+
+```
+--extractor-args "youtube:player_client=android,web"
+-f bestaudio*/best
+--no-playlist
+```
+
+Plus un retry unique avec backoff 5 s sur erreur HTTP 429.
+
+**Raison.**
+- Depuis fin 2024, le client `web` de YouTube exige un PO token /
+  Visitor Data pour servir les flux audio. yt-dlp tombe en HTTP 429 +
+  "Missing required Visitor Data" sans contournement.
+- Le client `android` n'a pas ce souci. La cascade `android,web` essaie
+  android d'abord, fallback web si jamais android est down.
+- `bestaudio*/best` (avec wildcard) accepte autant les formats audio-only
+  que les formats audio+video : certains clients YouTube n'exposent que
+  des streams combinés, et de toute façon ffmpeg strippe la vidéo via
+  `-vn` côté décodage.
+
+**Conséquences.**
+- Constantes partagées entre `src/youtube/ytdlp.ts` (metadata) et
+  `src/audio/ffmpeg.ts` (URL résolution + stream Opus).
+- À ré-évaluer si YouTube casse à nouveau la stratégie android — le
+  ticket à surveiller est le repo upstream
+  [`yt-dlp/yt-dlp`](https://github.com/yt-dlp/yt-dlp/issues).
+- Un rebuild Docker `--no-cache` re-télécharge le yt-dlp officiel
+  depuis GitHub releases ; en mode bare-metal il faut `pip install -U
+  yt-dlp` à la main.
+
+---
+
 ## Décisions ouvertes (à trancher)
 
-*(toutes les décisions structurantes du MVP sont prises — il ne reste que
-des micro-arbitrages d'implémentation, à régler en cours de route)*
+*Aucune. Le MVP a shippé. Toute nouvelle décision structurante doit
+arriver en D20+ sous la même structure (Contexte / Décision / Raison /
+Conséquences) et être référencée depuis le code concerné.*

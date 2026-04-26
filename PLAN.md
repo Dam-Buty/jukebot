@@ -1,5 +1,52 @@
 # PLAN.md — Plan d'implémentation jukebot
 
+> **STATUS: complete.** Les 12 phases (0–11) décrites ici ont été
+> livrées. Ce document est conservé tel quel, comme **archive
+> historique** du plan d'attaque initial — l'ordre dans lequel les
+> couches ont été montées, les choix d'implémentation faits en cours
+> de route, les risques identifiés. Pour comprendre le code aujourd'hui,
+> commence par le `README.md` (front door) puis `CLAUDE.md` (D1 → D19,
+> les décisions de design).
+>
+> Quelques détails ont évolué par rapport au plan ci-dessous ; les
+> écarts notables :
+>
+> - **Phase 9** prévoyait le full scan boot ; en pratique le boot fait
+>   un scan **incrémental** (curseur `lastSeenMessageId` persisté à la
+>   page), tournant en tâche de fond pour ne pas bloquer le démarrage.
+>   `/reset-playlist` fait, lui, un full scan synchrone.
+> - **Phase 11** prévoyait de tagger les tracks illisibles
+>   (`unavailable: true`). En pratique on les **retire** de la queue
+>   (cf. CLAUDE.md D16, `Store.removeTrackAt`).
+> - Le veto ❌ par réaction (CLAUDE.md D17) n'était pas dans le plan ;
+>   ajouté en cours de route, vit dans `src/playlist/reactions.ts`.
+> - `Track` porte un `addedBy` et un `addedAt` dérivé de
+>   `message.createdAt` (CLAUDE.md D18) — pas mentionné dans le plan
+>   de Phase 4.
+
+## Mapping rapide : décisions ↔ modules
+
+| Décision (CLAUDE.md) | Module                                                   |
+| -------------------- | -------------------------------------------------------- |
+| D1 / D2              | `package.json`, `src/main.ts`                            |
+| D3 / D19             | `src/youtube/ytdlp.ts`, `src/audio/ffmpeg.ts`            |
+| D4 / D12             | `src/playlist/store.ts`, `src/util/atomicWrite.ts`       |
+| D5 / D8 / D13        | `src/playlist/ingest.ts`, `src/youtube/urlMatcher.ts`    |
+| D6                   | `src/discord/client.ts`                                  |
+| D7                   | `src/playlist/timeline.ts`, `src/audio/playback.ts`      |
+| D9                   | `src/discord/voicePresence.ts`                           |
+| D10                  | `src/logger.ts`                                          |
+| D11                  | `src/discord/commands.ts`, `src/format/list.ts`          |
+| D14                  | `src/playlist/backfill.ts`, `src/discord/commands.ts`    |
+| D15                  | `Dockerfile`, `docker-compose.yml`                       |
+| D16                  | `src/audio/playback.ts`, `src/playlist/store.ts`         |
+| D17                  | `src/playlist/reactions.ts`, `src/playlist/ingest.ts`    |
+| D18                  | `src/playlist/types.ts`, `src/playlist/ingest.ts`        |
+
+---
+
+## Plan d'attaque originel (préservé tel quel ci-dessous)
+
 Plan d'attaque détaillé avant écriture du code. Lire `CLAUDE.md` en premier
 pour les décisions de design qui sous-tendent ce plan.
 
