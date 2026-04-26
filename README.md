@@ -34,10 +34,9 @@ Pré-requis hôte : `docker` + `docker compose`. C'est tout.
    le token, configurer les intents, inviter le bot sur ton serveur, et
    noter les 5 IDs nécessaires.
 2. `cp .env.example .env` puis remplir les valeurs.
-3. `docker compose up -d --build`
-4. `docker compose logs -f` pour suivre.
-5. Pour mettre à jour yt-dlp (en cas de breakage YouTube) :
-   `docker compose build --no-cache && docker compose up -d`.
+3. `npm run run:docker` (alias de `docker compose up --build`, foreground).
+4. Pour mettre à jour yt-dlp (en cas de breakage YouTube) :
+   `docker compose build --no-cache && npm run run:docker`.
 
 L'état (queue + horloge virtuelle) persiste dans `./data/state.json` via
 volume bind — survit aux restarts.
@@ -49,7 +48,11 @@ Si tu hackes sur le code et tu veux un cycle plus court :
 1. Avoir Node ≥ 20, `ffmpeg`, `yt-dlp` installés sur ta machine.
 2. `cp .env.example .env` puis remplir.
 3. `npm install`
-4. `npm run dev` (rechargement à chaud via `tsx watch`).
+4. Au choix :
+   - `npm run dev` — rechargement à chaud via `tsx watch` (idéal pendant le
+     code).
+   - `npm run run:bare` — build TypeScript puis lance la version compilée
+     (équivalent local de `run:docker`).
 
 ## Status
 

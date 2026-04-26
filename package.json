@@ -5,10 +5,12 @@
   "type": "module",
   "description": "Discord bot — YouTube radio over voice channels",
   "scripts": {
-    "dev": "tsx watch src/main.ts",
+    "dev": "tsx watch --env-file=.env src/main.ts",
     "build": "tsc",
     "start": "node dist/main.js",
-    "test": "tsx --test src/**/*.test.ts"
+    "test": "tsx --test src/**/*.test.ts",
+    "run:bare": "npm run build && node --env-file=.env dist/main.js",
+    "run:docker": "docker compose up --build"
   },
   "dependencies": {
     "@discordjs/opus": "^0.10.0",
