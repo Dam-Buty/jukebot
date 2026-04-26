@@ -2,6 +2,11 @@ import { spawn } from "node:child_process";
 import { logger } from "../logger.js";
 
 const YT_DLP_TIMEOUT_MS = 30_000;
+const RATE_LIMIT_RETRY_MS = 5_000;
+
+// Same client cascade as the playback path (audio/ffmpeg.ts) — keeps the
+// metadata calls out of the web_safari + Visitor Data PO token mess.
+const EXTRACTOR_ARGS = ["--extractor-args", "youtube:player_client=android,web"];
 
 export interface YtTrackMeta {
   youtubeId: string;
@@ -11,9 +16,15 @@ export interface YtTrackMeta {
   durationSec: number;
 }
 
-const spawnYtDlp = (args: string[]): Promise<string> =>
+const isRateLimited = (msg: string): boolean =>
+  /\b429\b|Too Many Requests/i.test(msg);
+
+const sleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms));
+
+const spawnYtDlpOnce = (args: string[]): Promise<string> =>
   new Promise((resolve, reject) => {
-    const child = spawn("yt-dlp", args, {
+    const child = spawn("yt-dlp", [...EXTRACTOR_ARGS, ...args], {
       stdio: ["ignore", "pipe", "pipe"],
       timeout: YT_DLP_TIMEOUT_MS,
     });
@@ -41,6 +52,22 @@ const spawnYtDlp = (args: string[]): Promise<string> =>
       resolve(stdout.trim());
     });
   });
+
+const spawnYtDlp = async (args: string[]): Promise<string> => {
+  try {
+    return await spawnYtDlpOnce(args);
+  } catch (err) {
+    if (isRateLimited((err as Error).message)) {
+      logger.warn(
+        { backoffMs: RATE_LIMIT_RETRY_MS },
+        "yt-dlp metadata rate limited, retrying once",
+      );
+      await sleep(RATE_LIMIT_RETRY_MS);
+      return spawnYtDlpOnce(args);
+    }
+    throw err;
+  }
+};
 
 const parseTrackJson = (raw: string, url: string): YtTrackMeta => {
   const data = JSON.parse(raw);

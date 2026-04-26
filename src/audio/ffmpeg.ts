@@ -6,20 +6,65 @@ import { logger } from "../logger.js";
 const execFileP = promisify(execFile);
 
 const YT_DLP_TIMEOUT_MS = 30_000;
+const RATE_LIMIT_RETRY_MS = 5_000;
+
+/**
+ * Shared yt-dlp args that sidestep two recurring YouTube headaches:
+ *
+ * - `youtube:player_client=android,web` falls through to the Android client
+ *   first, which doesn't require a Visitor Data PO token. The web client
+ *   started returning HTTP 429 + "Missing required Visitor Data" in late
+ *   2024; android continues to work.
+ * - The format selector `bestaudio* / best` (no space in real arg) accepts
+ *   both audio-only and audio+video formats so we don't fail when one
+ *   client only exposes combined streams. ffmpeg's `-vn` later strips
+ *   video on the decode side anyway.
+ */
+const YT_DLP_BASE_ARGS = [
+  "--extractor-args",
+  "youtube:player_client=android,web",
+  "-f",
+  "bestaudio*/best",
+  "--no-playlist",
+];
+
+const isRateLimited = (err: unknown): boolean => {
+  const msg = (err as Error)?.message ?? "";
+  return /\b429\b|Too Many Requests/i.test(msg);
+};
+
+const sleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
  * Resolve a YouTube watch URL to its direct media URL via `yt-dlp -g`.
- * Returns the first URL when multiple are emitted (audio-only here).
+ * Retries once on 429 after a brief backoff; returns the first URL when
+ * multiple are emitted (we treat the cascade as ranked by yt-dlp).
  */
-export const getDirectAudioUrl = async (youtubeUrl: string): Promise<string> => {
-  const { stdout } = await execFileP(
-    "yt-dlp",
-    ["-f", "bestaudio", "--no-playlist", "-g", youtubeUrl],
-    { timeout: YT_DLP_TIMEOUT_MS },
-  );
-  const url = stdout.trim().split("\n")[0];
-  if (!url) throw new Error(`yt-dlp returned no direct URL for ${youtubeUrl}`);
-  return url;
+export const getDirectAudioUrl = async (
+  youtubeUrl: string,
+  attempt = 0,
+): Promise<string> => {
+  try {
+    const { stdout } = await execFileP(
+      "yt-dlp",
+      [...YT_DLP_BASE_ARGS, "-g", youtubeUrl],
+      { timeout: YT_DLP_TIMEOUT_MS },
+    );
+    const url = stdout.trim().split("\n")[0];
+    if (!url) throw new Error(`yt-dlp returned no direct URL for ${youtubeUrl}`);
+    return url;
+  } catch (err) {
+    if (attempt === 0 && isRateLimited(err)) {
+      logger.warn(
+        { url: youtubeUrl, backoffMs: RATE_LIMIT_RETRY_MS },
+        "yt-dlp rate limited, retrying once",
+      );
+      await sleep(RATE_LIMIT_RETRY_MS);
+      return getDirectAudioUrl(youtubeUrl, attempt + 1);
+    }
+    throw err;
+  }
 };
 
 export interface OpusStream {
