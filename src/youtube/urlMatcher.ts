@@ -33,30 +33,53 @@ const hasListParam = (url: string): boolean => /[?&]list=([A-Za-z0-9_-]+)/.test(
 
 const hasIndexParam = (url: string): boolean => /[?&]index=\d+/.test(url);
 
+/**
+ * YouTube playlist IDs encode their origin in their prefix:
+ *
+ *   PL…           — user-created playlist (the canonical "playlist")
+ *   OL…           — auto-generated album list for an artist's uploads
+ *   RD…  RDMM…    — auto-generated radio/mix from a seed video
+ *   RDCLAK5uy_…   — auto-curated YouTube Music mix
+ *   UU/LL/WL/FL   — user library lists, not shareable as playlists
+ *
+ * When a user shares a single video while having a YouTube Mix open, the URL
+ * becomes `watch?v=X&list=RDX&start_radio=1`. We must treat that as a single
+ * track, not expand the entire endless mix. Only PL/OL IDs are real
+ * shareable playlists; everything else is YouTube cruft that came along
+ * with a single video.
+ */
+const isUserCuratedPlaylist = (playlistId: string): boolean =>
+  playlistId.startsWith("PL") || playlistId.startsWith("OL");
+
 export const detectUrls = (text: string): DetectedUrl[] => {
   const results: DetectedUrl[] = [];
   const seen = new Set<string>();
 
-  // First: dedicated playlist URLs
+  // First: dedicated /playlist?list=… URLs.
   for (const match of text.matchAll(patterns.playlist)) {
     const url = normalizeUrl(match[0]);
-    if (!seen.has(url)) {
-      seen.add(url);
+    if (seen.has(url)) continue;
+    seen.add(url);
+    if (isUserCuratedPlaylist(match[1])) {
       results.push({ type: "playlist", playlistId: match[1], url });
     }
+    // Otherwise: bare /playlist?list=RD… without a video to fall back to.
+    // Nothing to play; silently drop.
   }
 
-  // Second: individual track URLs
+  // Second: individual track URLs.
   const individualPatterns = [patterns.watch, patterns.short, patterns.shorts, patterns.music];
   for (const pattern of individualPatterns) {
     for (const match of text.matchAll(pattern)) {
       const url = normalizeUrl(match[0]);
       if (seen.has(url)) continue;
 
-      // If the watch URL has a list param but no index param, treat as playlist
+      // A list param without an index param normally means "share the whole
+      // playlist" — but only if the list ID looks user-curated. Otherwise
+      // it's a YouTube-injected mix and the user meant just the video.
       if (hasListParam(url) && !hasIndexParam(url)) {
         const listMatch = url.match(/[?&]list=([A-Za-z0-9_-]+)/);
-        if (listMatch) {
+        if (listMatch && isUserCuratedPlaylist(listMatch[1])) {
           seen.add(url);
           results.push({ type: "playlist", playlistId: listMatch[1], url });
           continue;

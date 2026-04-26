@@ -139,4 +139,58 @@ describe("detectUrls", () => {
       url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=PLrAXtmErZgOeiKm4sgNOknGvNjby9efdf&t=30",
     });
   });
+
+  // YouTube auto-generates a Mix (`list=RD…&start_radio=1`) when you click a
+  // single video while autoplay is on. The user shared just a track — we must
+  // not unfurl the entire endless radio.
+  it("treats watch?v=X&list=RDX&start_radio=1 as a single track (YouTube Mix cruft)", () => {
+    const result = detectUrls(
+      "https://www.youtube.com/watch?v=oNL3aR5GjaQ&list=RDoNL3aR5GjaQ&start_radio=1",
+    );
+    assert.equal(result.length, 1);
+    assert.deepStrictEqual(result[0], {
+      type: "track",
+      videoId: "oNL3aR5GjaQ",
+      url: "https://www.youtube.com/watch?v=oNL3aR5GjaQ&list=RDoNL3aR5GjaQ&start_radio=1",
+    });
+  });
+
+  it("treats watch?v=X&list=RDMM… (My Mix) as a single track", () => {
+    const result = detectUrls(
+      "https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=RDMMabcdef12345",
+    );
+    assert.equal(result.length, 1);
+    assert.equal(result[0].type, "track");
+    assert.equal((result[0] as { videoId: string }).videoId, "dQw4w9WgXcQ");
+  });
+
+  it("treats watch?v=X&list=RDCLAK5uy_… (YT Music auto-mix) as a single track", () => {
+    const result = detectUrls(
+      "https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=RDCLAK5uy_kFQXyqCRZ",
+    );
+    assert.equal(result.length, 1);
+    assert.equal(result[0].type, "track");
+    assert.equal((result[0] as { videoId: string }).videoId, "dQw4w9WgXcQ");
+  });
+
+  it("drops bare /playlist?list=RD… URLs (no video to fall back to)", () => {
+    const result = detectUrls(
+      "https://www.youtube.com/playlist?list=RDoNL3aR5GjaQ",
+    );
+    assert.equal(result.length, 0);
+  });
+
+  it("still expands user-curated /playlist?list=PL… and OL… URLs", () => {
+    const pl = detectUrls(
+      "https://www.youtube.com/playlist?list=PLrAXtmErZgOeiKm4sgNOknGvNjby9efdf",
+    );
+    assert.equal(pl.length, 1);
+    assert.equal(pl[0].type, "playlist");
+
+    const ol = detectUrls(
+      "https://www.youtube.com/playlist?list=OLAK5uy_kFQXyqCRZabcdef",
+    );
+    assert.equal(ol.length, 1);
+    assert.equal(ol[0].type, "playlist");
+  });
 });
