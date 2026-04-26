@@ -53,9 +53,9 @@ bot sur ton serveur.
 1. Crée (ou choisis) un **channel texte** qui servira de "playlist". C'est là
    où tu colleras les liens YouTube. Note son **ID** (Discord en mode dev :
    clic droit sur le channel → *Copy Channel ID*).
-2. Crée (ou choisis) un **channel vocal** où le bot ira jouer. Note son ID
-   aussi (ou laisse le bot rejoindre le vocal de la personne qui appelle
-   `/play` — on décidera dans `CLAUDE.md`).
+2. Crée (ou choisis) un **channel vocal** où le bot vivra en permanence. Le
+   bot ne change pas de channel — il s'y connecte au démarrage et y diffuse
+   sa "radio". Note son ID.
 3. Active le mode développeur si nécessaire : *User Settings → Advanced →
    Developer Mode*.
 
@@ -75,6 +75,6 @@ Pour pouvoir copier les IDs facilement :
 | `DISCORD_CLIENT_ID`    | onglet General Information → Application ID      |
 | `DISCORD_GUILD_ID`     | clic droit sur ton serveur → Copy Server ID       |
 | `PLAYLIST_CHANNEL_ID`  | clic droit sur le channel texte "playlist"        |
-| `VOICE_CHANNEL_ID`     | *(optionnel)* clic droit sur le channel vocal     |
+| `VOICE_CHANNEL_ID`     | clic droit sur le channel vocal "domicile" du bot |
 
 Une fois ces 5 valeurs récupérées, on peut passer à l'implémentation.

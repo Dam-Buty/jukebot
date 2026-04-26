@@ -6,10 +6,15 @@ dans un channel texte donné.
 
 ## Idée
 
-- On désigne un channel texte comme **"channel playlist"**.
-- Tout lien YouTube qui y est posté est ajouté à la queue du bot.
-- Le bot rejoint un channel vocal et joue la queue à la suite.
-- Quelques slash commands pour contrôler la lecture (skip, pause, queue, etc.).
+- Un channel texte désigné = **playlist** : tout lien YouTube qui y est
+  posté est ajouté à la queue.
+- Un channel vocal désigné = **scène** : le bot y vit en permanence.
+- Le bot fonctionne comme une **radio FM** : une horloge virtuelle avance en
+  continu, on transmet quand il y a des auditeurs et on coupe quand le
+  vocal est vide — mais la timeline ne s'arrête jamais. Si tu rejoins en
+  cours de track, tu tombes au milieu, comme dans une vraie radio.
+- Une seule slash command : `/list` pour voir la queue + position courante,
+  rendue en ANSI / Unicode dans un code block.
 
 ## Stack
 
