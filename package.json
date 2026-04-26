@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "@discordjs/opus": "^0.10.0",
-    "@discordjs/voice": "^0.18.0",
+    "@discordjs/voice": "^0.19.2",
     "discord.js": "^14.19.1",
     "libsodium-wrappers": "^0.7.15",
     "pino": "^9.7.0",
