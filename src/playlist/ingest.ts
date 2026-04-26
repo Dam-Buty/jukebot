@@ -25,13 +25,18 @@ const tryReact = async (message: Message, emoji: string): Promise<void> => {
   }
 };
 
-const processMessage = async (message: Message): Promise<void> => {
+/**
+ * Pure helper: pull every YouTube URL out of `message.content`, expand
+ * playlists into individual tracks, and return the resolved Track[]. Empty
+ * array if the message has no recognised URLs or if every resolution failed.
+ *
+ * Shared between live ingest (here) and backfill (playlist/backfill.ts).
+ */
+export const extractTracksFromMessage = async (
+  message: Pick<Message, "id" | "content">,
+): Promise<Track[]> => {
   const urls = detectUrls(message.content);
-  if (urls.length === 0) {
-    // Still mark as seen so backfill increment doesn't re-scan it.
-    getStore().setLastSeenMessageId(message.id);
-    return;
-  }
+  if (urls.length === 0) return [];
 
   const tracks: Track[] = [];
   for (const u of urls) {
@@ -46,9 +51,17 @@ const processMessage = async (message: Message): Promise<void> => {
         }
       }
     } catch (err) {
-      logger.warn({ err: (err as Error).message, url: u.url }, "failed to ingest URL");
+      logger.warn(
+        { err: (err as Error).message, url: u.url },
+        "failed to resolve URL",
+      );
     }
   }
+  return tracks;
+};
+
+const processMessage = async (message: Message): Promise<void> => {
+  const tracks = await extractTracksFromMessage(message);
 
   if (tracks.length > 0) {
     getStore().appendTracks(tracks);
@@ -57,10 +70,12 @@ const processMessage = async (message: Message): Promise<void> => {
       "tracks ingested",
     );
     await tryReact(message, "✅");
-  } else {
+  } else if (detectUrls(message.content).length > 0) {
+    // URLs were posted but none resolved — let the user know.
     await tryReact(message, "❌");
   }
-
+  // Mark every processed message so the incremental backfill skips it next
+  // time, regardless of whether we found tracks.
   getStore().setLastSeenMessageId(message.id);
 };
 

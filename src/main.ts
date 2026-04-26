@@ -3,14 +3,23 @@ import { logger } from "./logger.js";
 import { checkPrerequisites } from "./util/prerequisites.js";
 import { loginDiscord, getClient } from "./discord/client.js";
 import { getStore } from "./playlist/store.js";
-import { currentPosition } from "./playlist/timeline.js";
 import { connectVoice, disconnectVoice } from "./audio/voice.js";
-import { onPlayerEvent, playTrack, stopPlayback } from "./audio/player.js";
+import { stopPlayback } from "./audio/player.js";
+import { installPlaybackOrchestration, playCurrent } from "./audio/playback.js";
 import { installIngestListener } from "./playlist/ingest.js";
+import { scanChannel } from "./playlist/backfill.js";
+import {
+  hasListeners,
+  installVoicePresence,
+  teardownVoicePresence,
+} from "./discord/voicePresence.js";
+import {
+  installCommandHandlers,
+  registerSlashCommands,
+} from "./discord/commands.js";
 
 const main = async (): Promise<void> => {
   logger.info("jukebot starting…");
-  // Touch config so any invalid env aborts early with a helpful message.
   void config;
 
   await checkPrerequisites();
@@ -27,59 +36,47 @@ const main = async (): Promise<void> => {
 
   const store = getStore();
 
-  // Install the message listener early so links posted during voice connect
-  // still get queued.
   installIngestListener();
 
-  await connectVoice(channels.voiceChannel);
+  await registerSlashCommands();
+  installCommandHandlers(channels.playlistChannel);
 
-  const playCurrent = async (): Promise<void> => {
-    const pos = currentPosition(store.getState(), new Date());
-    if (!pos) {
-      logger.info("queue empty, radio silent");
-      return;
-    }
+  await connectVoice(channels.voiceChannel);
+  installPlaybackOrchestration(hasListeners);
+  installVoicePresence(channels.voiceChannel);
+
+  // Backfill runs in the background so the bot is fully online (commands,
+  // voice, live ingest) while it catches up on history. Tracks stream into
+  // the queue per page so /list shows progress and playback can start as
+  // soon as the first page lands.
+  void (async () => {
     try {
-      await playTrack(pos.track, pos.offsetSec);
+      const cursor = store.getState().lastSeenMessageId;
+      const { lastMessageId } = await scanChannel(
+        channels.playlistChannel,
+        cursor,
+        (pageTracks) => {
+          store.appendTracks(pageTracks);
+        },
+      );
+      if (lastMessageId) store.setLastSeenMessageId(lastMessageId);
+      logger.info("backfill complete");
     } catch (err) {
       logger.error(
-        { err: (err as Error).message, track: pos.track.title },
-        "playTrack failed, skipping",
+        { err: (err as Error).message },
+        "backfill scan failed; live ingest will pick up new posts regardless",
       );
-      store.markEndOfTrack();
-      // Re-enter; the next track may still work.
-      void playCurrent();
     }
-  };
+  })();
 
-  onPlayerEvent("track-finished", (err) => {
-    if (err) {
-      logger.warn({ err: err.message }, "track ended on error, advancing");
-    }
-    store.markEndOfTrack();
-    void playCurrent();
-  });
-
-  // When the queue transitions empty → non-empty (first link posted), kick
-  // playback. Subsequent appends are picked up on the next loop wrap (D12).
-  let lastTrackCount = store.getState().tracks.length;
-  store.on("tracks-changed", () => {
-    const count = store.getState().tracks.length;
-    if (lastTrackCount === 0 && count > 0) {
-      logger.info("queue went from empty to non-empty, starting playback");
-      void playCurrent();
-    }
-    lastTrackCount = count;
-  });
-
-  // If a previous session left tracks in state.json, resume right away.
-  if (store.getState().tracks.length > 0) {
-    void playCurrent();
-  }
+  // Note: we deliberately don't kick playCurrent() here. installVoicePresence
+  // does it on its own based on whether anyone is in the voice channel at
+  // boot time.
 
   const shutdown = async (signal: string): Promise<void> => {
     logger.info({ signal }, "shutting down…");
     try {
+      teardownVoicePresence();
       stopPlayback();
       disconnectVoice();
       await getClient().destroy();
