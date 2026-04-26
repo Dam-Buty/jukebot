@@ -30,6 +30,28 @@ const fmtTime = (sec: number): string => {
 const truncate = (text: string, max: number): string =>
   text.length <= max ? text : text.slice(0, Math.max(0, max - 1)) + "…";
 
+/**
+ * Compact human-readable delta for /list. Tuned for the bot's expected
+ * lifespan — anything older than a year just says "1y+ ago".
+ */
+export const relativeTime = (iso: string, now: Date): string => {
+  const ms = now.getTime() - new Date(iso).getTime();
+  if (!Number.isFinite(ms)) return "?";
+  if (ms < 0) return "in the future";
+  const sec = Math.floor(ms / 1000);
+  if (sec < 45) return "just now";
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const day = Math.floor(hr / 24);
+  if (day === 1) return "yesterday";
+  if (day < 30) return `${day}d ago`;
+  const month = Math.floor(day / 30);
+  if (month < 12) return `${month}mo ago`;
+  return `${Math.floor(day / 365)}y ago`;
+};
+
 const center = (text: string, width: number): string => {
   if (text.length >= width) return text.slice(0, width);
   const pad = width - text.length;
@@ -94,24 +116,34 @@ export const renderQueue = (
   ];
 
   const titleMax = 44;
+  const fmtAddedBy = (t: typeof pos.track): string => {
+    const author = t.addedBy ?? "?";
+    const when = t.addedAt ? relativeTime(t.addedAt, now) : "";
+    return when ? `added by ${author} · ${when}` : `added by ${author}`;
+  };
+
   const nowPlaying = [
     "",
     `${BOLD_YELLOW}▶  ${idx(pos.index + 1)} / ${idx(queueSize)}${RESET}`,
     `   ${BOLD_YELLOW}${truncate(`${pos.track.uploader} — ${pos.track.title}`, titleMax)}${RESET}`,
     `   ${GREEN}${progressBar(pos.offsetSec, pos.track.durationSec)}${RESET}   ${WHITE}${fmtTime(pos.offsetSec)} / ${fmtTime(pos.track.durationSec)}${RESET}`,
+    `   ${GRAY}${fmtAddedBy(pos.track)}${RESET}`,
   ];
 
   const upNextHeader = ["", `${WHITE}UP NEXT${RESET}`];
 
+  const UP_TITLE_W = 28;
+  const UP_AUTHOR_W = 12;
   const buildUpNext = (count: number): string[] => {
     const lines: string[] = [];
     for (let i = 1; i <= count; i++) {
       const ix = (pos.index + i) % queueSize;
       const t = tracks[ix];
-      const lineTitle = truncate(`${t.uploader} — ${t.title}`, 36);
+      const lineTitle = truncate(`${t.uploader} — ${t.title}`, UP_TITLE_W);
       const time = fmtTime(t.durationSec);
+      const author = truncate(t.addedBy ?? "?", UP_AUTHOR_W);
       lines.push(
-        `   ${GRAY}${idx(ix + 1)}  ${lineTitle.padEnd(36)} ${time.padStart(5)}${RESET}`,
+        `   ${GRAY}${idx(ix + 1)}  ${lineTitle.padEnd(UP_TITLE_W)} ${time.padStart(5)}  ${author.padEnd(UP_AUTHOR_W)}${RESET}`,
       );
     }
     return lines;

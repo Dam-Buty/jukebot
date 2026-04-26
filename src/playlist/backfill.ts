@@ -25,14 +25,17 @@ const compareSnowflake = (a: string, b: string): number => {
  * because the result is bounded by "newer than" semantics, which makes
  * forward pagination trivial.
  *
- * `onPage` is called after each parallel metadata batch with the running
- * tracks accumulator, so callers can stream results into the queue as
- * they're discovered (used by the boot backfill).
+ * `onPage` is called once per page (after that page's parallel metadata
+ * batch has fully resolved) with the page's *delta* tracks plus the ID of
+ * the last message in the page. This lets the boot backfill stream tracks
+ * into the queue AND advance the persisted cursor incrementally — if the
+ * bot is killed mid-scan, the next boot resumes from the last fully
+ * processed page instead of restarting from the beginning.
  */
 export const scanChannel = async (
   channel: TextChannel,
   afterId?: string,
-  onPage?: (tracksSoFar: Track[]) => void,
+  onPage?: (pageTracks: Track[], pageLastMessageId: string) => void,
 ): Promise<{ tracks: Track[]; lastMessageId: string | null }> => {
   const tracks: Track[] = [];
   let cursor: string = afterId ?? SNOWFLAKE_BEGINNING;
@@ -123,8 +126,10 @@ export const scanChannel = async (
       { page: pageNum, pageTracks: pageTracks.length, totalSoFar: tracks.length },
       "page complete, streaming to queue",
     );
-    // onPage receives the page's delta so callers can stream-append.
-    if (onPage && pageTracks.length > 0) onPage(pageTracks);
+    // Always notify per page (even if no tracks resolved) so callers can
+    // advance the persisted cursor — empty pages still represent progress
+    // through the channel history.
+    if (onPage && lastSeen) onPage(pageTracks, lastSeen);
 
     if (batch.size < PAGE_SIZE) break;
   }

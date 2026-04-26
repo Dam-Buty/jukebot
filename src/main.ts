@@ -46,20 +46,28 @@ const main = async (): Promise<void> => {
   installVoicePresence(channels.voiceChannel);
 
   // Backfill runs in the background so the bot is fully online (commands,
-  // voice, live ingest) while it catches up on history. Tracks stream into
-  // the queue per page so /list shows progress and playback can start as
-  // soon as the first page lands.
+  // voice, live ingest) while it catches up on history. Both the tracks
+  // *and* the lastSeenMessageId cursor are persisted per page — if the
+  // bot is killed mid-scan, the next boot resumes from the last fully
+  // processed page instead of restarting from the beginning of time.
+  // state.json is the cache here; nothing else needed.
   void (async () => {
     try {
-      const cursor = store.getState().lastSeenMessageId;
-      const { lastMessageId } = await scanChannel(
+      const resumeFrom = store.getState().lastSeenMessageId;
+      logger.info(
+        resumeFrom
+          ? { resumingFrom: resumeFrom }
+          : { mode: "full scan (no cached cursor)" },
+        "backfill starting",
+      );
+      await scanChannel(
         channels.playlistChannel,
-        cursor,
-        (pageTracks) => {
-          store.appendTracks(pageTracks);
+        resumeFrom,
+        (pageTracks, pageLastMessageId) => {
+          if (pageTracks.length > 0) store.appendTracks(pageTracks);
+          store.setLastSeenMessageId(pageLastMessageId);
         },
       );
-      if (lastMessageId) store.setLastSeenMessageId(lastMessageId);
       logger.info("backfill complete");
     } catch (err) {
       logger.error(

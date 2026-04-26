@@ -7,14 +7,28 @@ import { expandPlaylist, getTrackMeta, type YtTrackMeta } from "../youtube/ytdlp
 import { getStore } from "./store.js";
 import type { Track } from "./types.js";
 
-const metaToTrack = (meta: YtTrackMeta, messageId: string): Track => ({
+import { hasNegativeReaction, type ReactionLike } from "./reactions.js";
+export { hasNegativeReaction } from "./reactions.js";
+
+interface MessageForIngest {
+  id: string;
+  content: string;
+  createdAt: Date;
+  author: { username: string; globalName?: string | null };
+  reactions: { cache: { values(): Iterable<ReactionLike> } };
+}
+
+const metaToTrack = (meta: YtTrackMeta, msg: MessageForIngest): Track => ({
   youtubeId: meta.youtubeId,
   url: meta.url,
   title: meta.title,
   uploader: meta.uploader,
   durationSec: meta.durationSec,
-  addedAt: new Date().toISOString(),
-  addedByMessageId: messageId,
+  // Use the message creation time so /reset-playlist after a reboot
+  // reproduces the same `addedAt` instead of "whenever the bot scanned it".
+  addedAt: msg.createdAt.toISOString(),
+  addedByMessageId: msg.id,
+  addedBy: msg.author.globalName ?? msg.author.username,
 });
 
 const tryReact = async (message: Message, emoji: string): Promise<void> => {
@@ -28,13 +42,19 @@ const tryReact = async (message: Message, emoji: string): Promise<void> => {
 /**
  * Pure helper: pull every YouTube URL out of `message.content`, expand
  * playlists into individual tracks, and return the resolved Track[]. Empty
- * array if the message has no recognised URLs or if every resolution failed.
+ * array if the message has no recognised URLs, has been vetoed with a ❌
+ * reaction, or every resolution failed.
  *
  * Shared between live ingest (here) and backfill (playlist/backfill.ts).
  */
 export const extractTracksFromMessage = async (
-  message: Pick<Message, "id" | "content">,
+  message: MessageForIngest,
 ): Promise<Track[]> => {
+  if (hasNegativeReaction(message.reactions.cache.values())) {
+    logger.debug({ messageId: message.id }, "skipping ❌-vetoed message");
+    return [];
+  }
+
   const urls = detectUrls(message.content);
   if (urls.length === 0) return [];
 
@@ -43,11 +63,11 @@ export const extractTracksFromMessage = async (
     try {
       if (u.type === "track") {
         const meta = await getTrackMeta(u.url);
-        tracks.push(metaToTrack(meta, message.id));
+        tracks.push(metaToTrack(meta, message));
       } else {
         const metas = await expandPlaylist(u.url);
         for (const meta of metas) {
-          tracks.push(metaToTrack(meta, message.id));
+          tracks.push(metaToTrack(meta, message));
         }
       }
     } catch (err) {

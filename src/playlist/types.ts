@@ -6,6 +6,9 @@ export type Track = {
   durationSec: number;
   addedAt: string;
   addedByMessageId: string;
+  // Display name of the human who posted the link in the playlist channel.
+  // Optional so older state.json files (pre this field) still load.
+  addedBy?: string;
 };
 
 export type State = {
