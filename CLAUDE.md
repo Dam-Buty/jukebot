@@ -232,10 +232,17 @@ nouveau lien est posté, on (re)démarre la timeline à `now`.
 
 ---
 
-## D11 — Slash command unique : `/list` avec rendu ANSI dans un code block
+## D11 — Slash commands : `/list` et `/reset-playlist`
 
-**Décision.** Une seule slash command exposée : `/list`. Elle répond avec un
-**code block ANSI Discord** (` ```ansi `) montrant :
+**Décision.** Deux slash commands exposées :
+
+- **`/list`** — affiche la queue + position courante en code block ANSI.
+- **`/reset-playlist`** — vide la queue mémoire et la reconstruit en
+  rescannant tout l'historique du channel playlist. Utile quand
+  l'utilisateur a supprimé des liens du channel et veut que la radio
+  reflète le nouvel état. Cf. D14.
+
+`/list` répond avec un **code block ANSI Discord** (` ```ansi `) montrant :
 - En-tête ASCII / Unicode (titre + barre de séparation).
 - Track en cours, avec barre de progression Unicode (`▰▰▰▰▱▱▱▱`) et
   timestamp `mm:ss / mm:ss`.
@@ -272,17 +279,98 @@ UP NEXT
 
 ---
 
+## D12 — Queue épuisée : loop infini de la playlist
+
+**Décision.** La queue n'est jamais "épuisée" — c'est un **anneau infini**.
+Quand on atteint le dernier track, on revient au premier sans interruption,
+et la timeline continue de courir. Quand un nouveau lien est posté pendant
+qu'on est dans une boucle, il est **append à la fin** de l'anneau et sera
+lu lors du prochain passage à cette position.
+
+**Raison.**
+- Spec utilisateur : "on loop toujours la playlist". Modèle radio FM sans
+  fin, on n'attend pas l'auditeur ni la prochaine action.
+
+**Conséquences.**
+- Modèle d'état révisé : `{ tracks: Track[], currentIndex: number,
+  trackStartedAt: ISOString }`. Quand `now - trackStartedAt >=
+  tracks[currentIndex].duration`, on incrémente `currentIndex` modulo
+  `tracks.length` et on avance `trackStartedAt += duration`.
+- Si `tracks.length === 0` → état "silencieux" : on n'a rien à jouer, on
+  attend le premier lien. À ce moment-là : `startedAt = now`, `currentIndex
+  = 0`, on démarre.
+- L'append d'un nouveau track ne perturbe pas la lecture en cours : il
+  rentre dans la rotation au prochain tour. (Pas de mid-cycle injection,
+  trop chiant à raisonner et invisible côté auditeur.)
+
+---
+
+## D13 — Pas de déduplication
+
+**Décision.** Si la même URL YouTube est postée N fois dans le channel
+playlist, elle apparaît N fois dans la queue. Aucun dédup, ni à l'ingestion
+en temps réel, ni au backfill, ni au `/reset-playlist`.
+
+**Raison.**
+- Spec utilisateur explicite : "si il est posté X fois il est X fois dans
+  la playlist".
+- Permet de pondérer un morceau à la main en le postant plusieurs fois
+  (genre "je veux que ce track sorte plus souvent dans la loop").
+
+**Conséquences.**
+- L'ordre des doublons suit l'ordre chronologique des posts dans le
+  channel (donc cohérent entre live ingestion et backfill).
+
+---
+
+## D14 — Backfill au démarrage + `/reset-playlist`
+
+**Décision.** Deux mécanismes de reconstruction de la queue depuis le
+channel playlist :
+
+1. **Backfill au démarrage.** Au boot, le bot scanne l'historique du
+   channel `PLAYLIST_CHANNEL_ID` pour récupérer **tous** les liens YouTube
+   jamais postés, dans l'ordre chronologique (oldest → newest), et les
+   ingère dans la queue. La timeline démarre à `now` une fois le backfill
+   terminé.
+
+   - Sur les boots suivants : on stocke `lastSeenMessageId` dans
+     `state.json` ; au boot on **fetch uniquement les messages plus récents**
+     pour éviter de tout rescanner. La queue déjà persistée est reload telle
+     quelle, et on append les nouveautés.
+   - Première fois (pas de `state.json`) : full scan, page par page (Discord
+     API limite à 100 messages par appel).
+
+2. **`/reset-playlist`.** Slash command qui :
+   - **vide** complètement la queue mémoire,
+   - **rescanne tout l'historique** du channel playlist depuis le début,
+   - **rebuild** la queue dans l'ordre chronologique,
+   - **réinitialise** la timeline (`startedAt = now`, `currentIndex = 0`).
+
+   Geste destructif explicite, idéal après que l'utilisateur a supprimé des
+   messages du channel et veut que la radio reflète le nouvel état.
+
+**Raison.**
+- Spec utilisateur explicite ("oui on backfill au démarrage" + commande de
+  reset).
+- Le distingo backfill incrémental / reset full évite de tout rescanner à
+  chaque restart sans pour autant condamner l'utilisateur à un état
+  divergent du channel.
+
+**Conséquences.**
+- Permission `Read Message History` indispensable (déjà dans `SETUP.md`).
+- Le full scan d'un channel volumineux peut prendre du temps : on stream
+  l'expansion (post une reaction sur le message du `/reset-playlist` style
+  ⏳ → ✅, ou on edit la réponse différée Discord).
+- Pendant un `/reset-playlist`, la radio peut soit (a) continuer sur
+  l'ancienne queue jusqu'à ce que la nouvelle soit prête puis swap atomique,
+  soit (b) couper net et reprendre quand prêt. → choisir (a) pour ne pas
+  casser l'écoute en cours. **Ouvert : confirmer ce choix dans
+  l'implémentation.**
+
+---
+
 ## Décisions ouvertes (à trancher)
 
-- **D12 — Comportement quand la queue est totalement consommée.** Trois
-  options : (a) timeline gelée, on attend qu'un nouveau lien soit posté ;
-  (b) loop sur la queue passée ; (c) silence radio sans rien afficher.
-  Mon préf : (a) — cohérent avec "playlist". À confirmer.
-- **D13 — Stratégie de déduplication** : si la même URL est postée deux fois
-  dans le channel, on la queue deux fois ou on dédup ? Je propose : pas de
-  dédup (l'utilisateur peut vouloir mettre un morceau deux fois exprès).
-- **D14 — Filtre temporel sur le channel playlist au démarrage.** Au boot,
-  est-ce qu'on backfill les liens YouTube postés dans le channel pendant
-  que le bot était down (ex. derniers 50 messages), ou seulement les
-  nouveaux ? Je propose : seulement les nouveaux (sinon on rejoue tout
-  l'historique au moindre restart).
+*(toutes les décisions structurantes du MVP sont prises — il ne reste que
+des micro-arbitrages d'implémentation, à régler en cours de route)*
