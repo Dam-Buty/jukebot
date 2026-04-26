@@ -20,6 +20,8 @@ import {
 import {
   clearChannelStatus,
   installChannelStatus,
+  startChannelStatusSync,
+  stopChannelStatusSync,
 } from "./discord/channelStatus.js";
 
 const main = async (): Promise<void> => {
@@ -49,6 +51,7 @@ const main = async (): Promise<void> => {
   installChannelStatus(channels.voiceChannel);
   installPlaybackOrchestration(hasListeners);
   installVoicePresence(channels.voiceChannel);
+  startChannelStatusSync();
 
   // Backfill runs in the background so the bot is fully online (commands,
   // voice, live ingest) while it catches up on history. Both the tracks
@@ -90,6 +93,7 @@ const main = async (): Promise<void> => {
     logger.info({ signal }, "shutting down…");
     try {
       teardownVoicePresence();
+      stopChannelStatusSync();
       stopPlayback();
       await clearChannelStatus();
       disconnectVoice();

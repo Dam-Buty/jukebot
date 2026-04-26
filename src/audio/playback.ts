@@ -1,5 +1,5 @@
 import { logger } from "../logger.js";
-import { setChannelStatus } from "../discord/channelStatus.js";
+import { refreshChannelStatus } from "../discord/channelStatus.js";
 import { getStore } from "../playlist/store.js";
 import { currentPosition } from "../playlist/timeline.js";
 import { onPlayerEvent, playTrack, stopPlayback } from "./player.js";
@@ -30,7 +30,7 @@ export const playCurrent = async (): Promise<void> => {
     const pos = currentPosition(store.getState(), new Date());
     if (!pos) {
       logger.info("queue empty, radio silent");
-      void setChannelStatus(null);
+      refreshChannelStatus();
       return;
     }
     if (!hasListenersProbe()) {
@@ -40,7 +40,9 @@ export const playCurrent = async (): Promise<void> => {
 
     try {
       await playTrack(pos.track, pos.offsetSec);
-      void setChannelStatus(`♪ ${pos.track.uploader} — ${pos.track.title}`);
+      // Nudge the status sync so the title flips instantly on this track
+      // change rather than waiting up to POLL_MS for the next tick.
+      refreshChannelStatus();
     } catch (err) {
       logger.error(
         { err: (err as Error).message, track: pos.track.title, index: pos.index },
