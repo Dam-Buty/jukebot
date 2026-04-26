@@ -40,10 +40,14 @@ export const playCurrent = async (): Promise<void> => {
       await playTrack(pos.track, pos.offsetSec);
     } catch (err) {
       logger.error(
-        { err: (err as Error).message, track: pos.track.title },
-        "playTrack failed, advancing to next",
+        { err: (err as Error).message, track: pos.track.title, index: pos.index },
+        "playTrack failed, removing track from queue",
       );
-      store.markEndOfTrack();
+      // Permanent failure to start (video removed, age-gated, region-locked,
+      // …) — drop it so we don't waste a full loop pass retrying every time.
+      // If it was a transient error, the user can re-post and the live ingest
+      // will queue it back up.
+      store.removeTrackAt(pos.index);
       // Small backoff so a queue full of broken tracks doesn't pin CPU.
       await sleep(FAILURE_BACKOFF_MS);
       isReplaying = false;
@@ -76,8 +80,22 @@ export const installPlaybackOrchestration = (hasListeners: ListenerProbe): void 
   const store = getStore();
 
   onPlayerEvent("track-finished", (err) => {
-    if (err) logger.warn({ err: err.message }, "track ended on error, advancing");
-    store.markEndOfTrack();
+    if (err) {
+      // Mid-stream playback failure — drop the offending track instead of
+      // advancing past it, so the next loop pass doesn't trip on it again.
+      const cur = currentPosition(store.getState(), new Date());
+      if (cur) {
+        logger.warn(
+          { err: err.message, track: cur.track.title, index: cur.index },
+          "track errored mid-playback, removing from queue",
+        );
+        store.removeTrackAt(cur.index);
+      } else {
+        logger.warn({ err: err.message }, "track errored, queue already empty");
+      }
+    } else {
+      store.markEndOfTrack();
+    }
     void playCurrent();
   });
 

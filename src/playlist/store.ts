@@ -112,6 +112,55 @@ export class Store {
     this.persist();
   }
 
+  /**
+   * Drop a track from the queue (typically after a permanent playback
+   * failure: video removed, age-gated, region-locked, etc.). Indices and
+   * the timeline anchor are adjusted so the radio carries on smoothly:
+   *
+   * - Removing a track *before* `currentIndex` shifts `currentIndex` left.
+   * - Removing the *current* track keeps `currentIndex` pointed at what is
+   *   now the same slot (the next track has shifted in), and re-anchors
+   *   `trackStartedAt` to `now` so the new current starts from 0:00.
+   * - Removing a track *after* `currentIndex` is invisible to playback.
+   * - Removing the last track of the queue resets to the empty state.
+   */
+  removeTrackAt(index: number): void {
+    const { tracks, currentIndex } = this.state;
+    if (index < 0 || index >= tracks.length) return;
+
+    const newTracks = [...tracks.slice(0, index), ...tracks.slice(index + 1)];
+
+    if (newTracks.length === 0) {
+      this.state = {
+        ...this.state,
+        tracks: newTracks,
+        currentIndex: 0,
+        trackStartedAt: new Date().toISOString(),
+      };
+    } else if (index < currentIndex) {
+      // Earlier track removed — slide the index left, keep the anchor.
+      this.state = {
+        ...this.state,
+        tracks: newTracks,
+        currentIndex: currentIndex - 1,
+      };
+    } else if (index === currentIndex) {
+      // Current track removed — same slot, re-anchor at now.
+      this.state = {
+        ...this.state,
+        tracks: newTracks,
+        currentIndex: currentIndex % newTracks.length,
+        trackStartedAt: new Date().toISOString(),
+      };
+    } else {
+      // Later track removed — current playback unaffected.
+      this.state = { ...this.state, tracks: newTracks };
+    }
+
+    this.persist();
+    this.emitter.emit("tracks-changed");
+  }
+
   on(event: StoreEvent, listener: () => void): void {
     this.emitter.on(event, listener);
   }

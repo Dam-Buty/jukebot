@@ -139,4 +139,132 @@ describe("Store", () => {
     const reloaded = new Store(path);
     assert.equal(reloaded.getState().tracks.length, 1);
   });
+
+  describe("removeTrackAt", () => {
+    it("is a no-op for out-of-range indices", () => {
+      const store = new Store(path);
+      store.appendTracks([
+        makeTrack({ youtubeId: "a" }),
+        makeTrack({ youtubeId: "b" }),
+      ]);
+      store.removeTrackAt(-1);
+      store.removeTrackAt(99);
+      assert.equal(store.getState().tracks.length, 2);
+    });
+
+    it("removes a future track without disturbing the current playback", () => {
+      const store = new Store(path);
+      store.appendTracks([
+        makeTrack({ youtubeId: "a", durationSec: 60 }),
+        makeTrack({ youtubeId: "b" }),
+        makeTrack({ youtubeId: "c" }),
+      ]);
+      const anchorBefore = store.getState().trackStartedAt;
+      store.removeTrackAt(2); // remove "c"
+      const s = store.getState();
+      assert.equal(s.tracks.length, 2);
+      assert.deepStrictEqual(
+        s.tracks.map((t) => t.youtubeId),
+        ["a", "b"],
+      );
+      assert.equal(s.currentIndex, 0);
+      assert.equal(s.trackStartedAt, anchorBefore);
+    });
+
+    it("removes an earlier track and slides currentIndex left", () => {
+      const store = new Store(path);
+      store.appendTracks([
+        makeTrack({ youtubeId: "a" }),
+        makeTrack({ youtubeId: "b" }),
+        makeTrack({ youtubeId: "c" }),
+      ]);
+      store.markEndOfTrack(); // currentIndex = 1 (b)
+      const anchorBefore = store.getState().trackStartedAt;
+
+      store.removeTrackAt(0); // remove "a"
+
+      const s = store.getState();
+      assert.equal(s.tracks.length, 2);
+      assert.deepStrictEqual(
+        s.tracks.map((t) => t.youtubeId),
+        ["b", "c"],
+      );
+      assert.equal(s.currentIndex, 0); // b stayed current, just at index 0
+      assert.equal(s.trackStartedAt, anchorBefore);
+    });
+
+    it("removes the current track and re-anchors at now", async () => {
+      const store = new Store(path);
+      store.appendTracks([
+        makeTrack({ youtubeId: "a", durationSec: 60 }),
+        makeTrack({ youtubeId: "b", durationSec: 60 }),
+        makeTrack({ youtubeId: "c", durationSec: 60 }),
+      ]);
+      const anchorBefore = new Date(store.getState().trackStartedAt).getTime();
+      // wait a tick so the new anchor is observably different
+      await new Promise((r) => setTimeout(r, 5));
+
+      store.removeTrackAt(0); // remove the current "a"
+
+      const s = store.getState();
+      assert.equal(s.tracks.length, 2);
+      assert.deepStrictEqual(
+        s.tracks.map((t) => t.youtubeId),
+        ["b", "c"],
+      );
+      assert.equal(s.currentIndex, 0); // b shifted into slot 0
+      const anchorAfter = new Date(s.trackStartedAt).getTime();
+      assert.ok(
+        anchorAfter > anchorBefore,
+        "trackStartedAt should be re-anchored to now",
+      );
+    });
+
+    it("wraps currentIndex when the last track is removed and current was last", () => {
+      const store = new Store(path);
+      store.appendTracks([
+        makeTrack({ youtubeId: "a" }),
+        makeTrack({ youtubeId: "b" }),
+      ]);
+      store.markEndOfTrack(); // currentIndex = 1 (b)
+      store.removeTrackAt(1); // remove the current "b"
+
+      const s = store.getState();
+      assert.equal(s.tracks.length, 1);
+      assert.equal(s.tracks[0].youtubeId, "a");
+      assert.equal(s.currentIndex, 0);
+    });
+
+    it("falls back to empty state when the last track is removed", () => {
+      const store = new Store(path);
+      store.appendTracks([makeTrack()]);
+      store.removeTrackAt(0);
+      const s = store.getState();
+      assert.equal(s.tracks.length, 0);
+      assert.equal(s.currentIndex, 0);
+    });
+
+    it("emits tracks-changed on removal", () => {
+      const store = new Store(path);
+      store.appendTracks([makeTrack(), makeTrack({ youtubeId: "b" })]);
+      let count = 0;
+      store.on("tracks-changed", () => count++);
+      store.removeTrackAt(0);
+      assert.equal(count, 1);
+    });
+
+    it("persists the change", () => {
+      const store = new Store(path);
+      store.appendTracks([
+        makeTrack({ youtubeId: "a" }),
+        makeTrack({ youtubeId: "b" }),
+      ]);
+      store.removeTrackAt(0);
+      const reloaded = new Store(path);
+      assert.deepStrictEqual(
+        reloaded.getState().tracks.map((t) => t.youtubeId),
+        ["b"],
+      );
+    });
+  });
 });
