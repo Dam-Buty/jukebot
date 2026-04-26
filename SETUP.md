@@ -46,6 +46,9 @@ Onglet **OAuth2 → URL Generator** :
     playlist pour signaler les liens ingérés / non résolus)
   - `Connect` (rejoindre un channel vocal)
   - `Speak` (parler dans un channel vocal)
+  - `Set Voice Channel Status` (le bot affiche le titre du track en cours
+    sous le nom du channel vocal ; sans cette permission le bot logge un
+    warn et continue à jouer)
   - *(optionnel)* `Embed Links`
 
 Copie l'URL générée en bas de page → ouvre-la dans le navigateur → invite le

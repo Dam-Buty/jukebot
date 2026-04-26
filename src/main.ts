@@ -17,6 +17,10 @@ import {
   installCommandHandlers,
   registerSlashCommands,
 } from "./discord/commands.js";
+import {
+  clearChannelStatus,
+  installChannelStatus,
+} from "./discord/channelStatus.js";
 
 const main = async (): Promise<void> => {
   logger.info("jukebot starting…");
@@ -42,6 +46,7 @@ const main = async (): Promise<void> => {
   installCommandHandlers(channels.playlistChannel);
 
   await connectVoice(channels.voiceChannel);
+  installChannelStatus(channels.voiceChannel);
   installPlaybackOrchestration(hasListeners);
   installVoicePresence(channels.voiceChannel);
 
@@ -86,6 +91,7 @@ const main = async (): Promise<void> => {
     try {
       teardownVoicePresence();
       stopPlayback();
+      await clearChannelStatus();
       disconnectVoice();
       await getClient().destroy();
     } catch (err) {
