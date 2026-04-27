@@ -31,7 +31,7 @@ const pushStatus = async (next: string | null): Promise<void> => {
   try {
     await channel.client.rest.put(
       `/channels/${channel.id}/voice-status` as `/${string}`,
-      { body: { status: value ?? "" } },
+      { body: { status: value } },
     );
     lastSet = value;
     logger.debug({ status: value }, "voice channel status set");

@@ -5,6 +5,7 @@ import {
   AudioPlayerStatus,
   StreamType,
   NoSubscriberBehavior,
+  type VoiceConnection,
 } from "@discordjs/voice";
 import { EventEmitter } from "node:events";
 import { logger } from "../logger.js";
@@ -26,7 +27,7 @@ const player: AudioPlayer = createAudioPlayer({
 });
 
 let currentStream: OpusStream | null = null;
-let subscribed = false;
+let subscribedConnection: VoiceConnection | null = null;
 let trackInProgress = false;
 let stoppingIntentionally = false;
 
@@ -48,13 +49,20 @@ player.on("error", (err) => {
 });
 
 const ensureSubscribed = (): void => {
-  if (subscribed) return;
   const conn = getConnection();
   if (!conn) {
     throw new Error("voice connection not established; call connectVoice first");
   }
+  // Track the *reference* of the connection we're subscribed to, not just
+  // a boolean: after an idle disconnect + reconnect, getConnection returns
+  // a fresh VoiceConnection and we must re-subscribe the player to it.
+  // The old code's subscribed=true cache survived destruction of the
+  // previous connection, leaving the player wired to nothing — playback
+  // logs ran but no audio reached Discord.
+  if (subscribedConnection === conn) return;
   conn.subscribe(player);
-  subscribed = true;
+  subscribedConnection = conn;
+  logger.debug("audio player subscribed to voice connection");
 };
 
 export const playTrack = async (track: Track, offsetSec: number): Promise<void> => {
