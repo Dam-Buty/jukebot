@@ -3,7 +3,7 @@
 # ============================================================================
 # Build stage : compile TypeScript et installe les deps natives (node-gyp).
 # ============================================================================
-FROM node:20-bookworm-slim AS build
+FROM node:22-bookworm-slim AS build
 
 WORKDIR /app
 
@@ -31,7 +31,7 @@ RUN npm ci --omit=dev
 # ============================================================================
 # Runtime stage : Node + ffmpeg + yt-dlp, image figée pour la prod.
 # ============================================================================
-FROM node:20-bookworm-slim AS runtime
+FROM node:22-bookworm-slim AS runtime
 
 ENV NODE_ENV=production \
     NPM_CONFIG_UPDATE_NOTIFIER=false
